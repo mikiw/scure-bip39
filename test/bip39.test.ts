@@ -1,19 +1,53 @@
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { describe, should } from '@paulmillr/jsbt/test.js';
 import {
+  validateMnemonicFromBytes,
   entropyToMnemonic,
+  entropyToMnemonicBytes,
+  entropyToSeedSyncFromBytes,
+  generateEntropyBytes,
   generateMnemonic,
   mnemonicToEntropy,
+  mnemonicToEntropyFromBytes,
   mnemonicToSeed,
   mnemonicToSeedSync,
+  mnemonicToSeedFromBytes,
   mnemonicToSeedWebcrypto,
+  mnemonicToSeedFromBytesWebcrypto,
   validateMnemonic,
+  equalBytes,
+  normalizeMnemonicBytes,
+  splitMnemonicBytes,
+  nfkdBytes,
 } from '../src/index.ts';
+import { wordlist as czechWordlist } from '../src/wordlists/czech.ts';
 import { wordlist as englishWordlist } from '../src/wordlists/english.ts';
+import { wordlist as frenchWordlist } from '../src/wordlists/french.ts';
+import { wordlist as italianWordlist } from '../src/wordlists/italian.ts';
 import { wordlist as japaneseWordlist } from '../src/wordlists/japanese.ts';
+import { wordlist as koreanWordlist } from '../src/wordlists/korean.ts';
 import { wordlist as portugueseWordlist } from '../src/wordlists/portuguese.ts';
+import { wordlist as simplifiedChineseWordlist } from '../src/wordlists/simplified-chinese.ts';
 import { wordlist as spanishWordlist } from '../src/wordlists/spanish.ts';
+import { wordlist as traditionalChineseWordlist } from '../src/wordlists/traditional-chinese.ts';
 import { deepStrictEqual, throws } from './assert.ts';
+
+const BYTE_PARITY_ENTROPIES = [
+  hexToBytes('00000000000000000000000000000000'),
+  hexToBytes('4fa1a8bc3e6d80ee1316050e862c1812031493212b7ec3f3bb1b08f168cabeef'),
+];
+const BYTE_PARITY_WORDLISTS = [
+  { name: 'Czech', wordlist: czechWordlist },
+  { name: 'English', wordlist: englishWordlist },
+  { name: 'French', wordlist: frenchWordlist },
+  { name: 'Italian', wordlist: italianWordlist },
+  { name: 'Japanese', wordlist: japaneseWordlist },
+  { name: 'Korean', wordlist: koreanWordlist },
+  { name: 'Portuguese', wordlist: portugueseWordlist },
+  { name: 'Simplified Chinese', wordlist: simplifiedChineseWordlist },
+  { name: 'Spanish', wordlist: spanishWordlist },
+  { name: 'Traditional Chinese', wordlist: traditionalChineseWordlist },
+];
 
 export function equalsBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) {
@@ -137,6 +171,118 @@ describe('BIP39', () => {
           const recoveredSeedWeb = await mnemonicToSeedWebcrypto(MENMONIC, PASSPHRASE);
           deepStrictEqual(equalsBytes(SEED, recoveredSeedWeb), true);
         });
+      });
+    });
+    describe('Uint8Array helpers', () => {
+      const MENMONIC_STR = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
+      const MENMONIC_BYTES = new TextEncoder().encode(MENMONIC_STR);
+      const PASSPHRASE_STR = 'password';
+      const PASSPHRASE_BYTES = new TextEncoder().encode(PASSPHRASE_STR);
+      const UTF8_PASSPHRASE_STR = '七転び八起き、がんばりましょう';
+      const UTF8_PASSPHRASE_BYTES = new TextEncoder().encode(UTF8_PASSPHRASE_STR);
+      const JAPANESE_ENTROPY = hexToBytes('7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f');
+      const JAPANESE_MNEMONIC_STR = entropyToMnemonic(JAPANESE_ENTROPY, japaneseWordlist);
+      const JAPANESE_MNEMONIC_BYTES = new TextEncoder().encode(JAPANESE_MNEMONIC_STR);
+
+      should('generate entropy bytes correctly', () => {
+        const entropy = generateEntropyBytes(128);
+        deepStrictEqual(entropy instanceof Uint8Array, true);
+        deepStrictEqual(entropy.length, 16);
+        const mnemonicBytes = entropyToMnemonicBytes(entropy, englishWordlist);
+        deepStrictEqual(
+          validateMnemonic(new TextDecoder().decode(mnemonicBytes), englishWordlist),
+          true
+        );
+      });
+
+      should('convert entropy to mnemonic bytes correctly', () => {
+        const entropy = hexToBytes('7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f');
+        const expected = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
+        const mnemonicBytes = entropyToMnemonicBytes(entropy, englishWordlist);
+        deepStrictEqual(new TextDecoder().decode(mnemonicBytes), expected);
+      });
+
+      should('convert Japanese entropy to mnemonic bytes correctly', () => {
+        const mnemonicBytes = entropyToMnemonicBytes(JAPANESE_ENTROPY, japaneseWordlist);
+        const mnemonic = new TextDecoder().decode(mnemonicBytes);
+        deepStrictEqual(mnemonic.includes('\u3000'), true);
+        deepStrictEqual(validateMnemonic(mnemonic, japaneseWordlist), true);
+      });
+
+      should('validate English mnemonic bytes correctly', () => {
+        deepStrictEqual(validateMnemonicFromBytes(MENMONIC_BYTES, englishWordlist), true);
+      });
+
+      should('recover entropy from English mnemonic bytes', () => {
+        const entropy1 = mnemonicToEntropy(MENMONIC_STR, englishWordlist);
+        const entropy2 = mnemonicToEntropyFromBytes(MENMONIC_BYTES, englishWordlist);
+        deepStrictEqual(entropy1, entropy2);
+      });
+
+      should('recover entropy from Japanese mnemonic bytes', () => {
+        deepStrictEqual(
+          bytesToHex(mnemonicToEntropyFromBytes(JAPANESE_MNEMONIC_BYTES, japaneseWordlist)),
+          bytesToHex(JAPANESE_ENTROPY)
+        );
+        deepStrictEqual(
+          validateMnemonicFromBytes(JAPANESE_MNEMONIC_BYTES, japaneseWordlist),
+          true
+        );
+      });
+
+      should('reject mnemonic bytes with the wrong wordlist', () => {
+        deepStrictEqual(validateMnemonicFromBytes(MENMONIC_BYTES, spanishWordlist), false);
+        throws(() => mnemonicToEntropyFromBytes(MENMONIC_BYTES, spanishWordlist));
+        deepStrictEqual(
+          validateMnemonicFromBytes(JAPANESE_MNEMONIC_BYTES, englishWordlist),
+          false
+        );
+        throws(() => mnemonicToEntropyFromBytes(JAPANESE_MNEMONIC_BYTES, englishWordlist));
+      });
+
+      should('derive seed from entropy bytes correctly', () => {
+        const entropy = mnemonicToEntropy(MENMONIC_STR, englishWordlist);
+        const seed1 = mnemonicToSeedSync(MENMONIC_STR, PASSPHRASE_STR);
+        const seed2 = entropyToSeedSyncFromBytes(entropy, englishWordlist, PASSPHRASE_BYTES);
+        deepStrictEqual(seed1, seed2);
+      });
+
+      should('derive seed from entropy bytes with UTF-8 passphrase correctly', () => {
+        const seed1 = mnemonicToSeedSync(JAPANESE_MNEMONIC_STR, UTF8_PASSPHRASE_STR);
+        const seed2 = entropyToSeedSyncFromBytes(
+          JAPANESE_ENTROPY,
+          japaneseWordlist,
+          UTF8_PASSPHRASE_BYTES
+        );
+        deepStrictEqual(seed1, seed2);
+      });
+
+      should('derive seed from mnemonic bytes correctly (async)', async () => {
+        const seed1 = await mnemonicToSeed(MENMONIC_STR, PASSPHRASE_STR);
+        const seed2 = await mnemonicToSeedFromBytes(MENMONIC_BYTES, PASSPHRASE_BYTES);
+        deepStrictEqual(seed1, seed2);
+        const seed3 = await mnemonicToSeedFromBytesWebcrypto(MENMONIC_BYTES, PASSPHRASE_BYTES);
+        deepStrictEqual(seed1, seed3);
+      });
+
+      should('derive seed from Japanese mnemonic bytes correctly (async)', async () => {
+        const seed1 = await mnemonicToSeed(JAPANESE_MNEMONIC_STR, UTF8_PASSPHRASE_STR);
+        const seed2 = await mnemonicToSeedFromBytes(JAPANESE_MNEMONIC_BYTES, UTF8_PASSPHRASE_BYTES);
+        deepStrictEqual(seed1, seed2);
+        const seed3 = await mnemonicToSeedFromBytesWebcrypto(
+          JAPANESE_MNEMONIC_BYTES,
+          UTF8_PASSPHRASE_BYTES
+        );
+        deepStrictEqual(seed1, seed3);
+      });
+
+      should('support variable entropy length', () => {
+        deepStrictEqual(generateEntropyBytes(160).length, 20);
+      });
+
+      should('reject invalid entropy strength', () => {
+        throws(() => generateEntropyBytes(96));
+        throws(() => generateEntropyBytes(288));
       });
     });
   });
@@ -432,6 +578,24 @@ describe('BIP39', () => {
         i
       );
     }
+    for (const { name, wordlist } of BYTE_PARITY_WORDLISTS) {
+      for (const entropy of BYTE_PARITY_ENTROPIES) {
+        const entropyHex = bytesToHex(entropy);
+        should(`${name} bytes/string mnemonic parity (${entropyHex})`, () => {
+          const mnemonic = entropyToMnemonic(entropy, wordlist);
+          const mnemonicBytes = entropyToMnemonicBytes(entropy, wordlist);
+          deepStrictEqual(new TextDecoder().decode(mnemonicBytes), mnemonic);
+        });
+        should(`${name} bytes/string recovery parity (${entropyHex})`, () => {
+          const mnemonic = entropyToMnemonic(entropy, wordlist);
+          const mnemonicBytes = new TextEncoder().encode(mnemonic);
+          deepStrictEqual(
+            bytesToHex(mnemonicToEntropyFromBytes(mnemonicBytes, wordlist)),
+            bytesToHex(mnemonicToEntropy(mnemonic, wordlist))
+          );
+        });
+      }
+    }
     should('Invalid entropy', () => {
       throws(() => entropyToMnemonic(Uint8Array.of(), englishWordlist));
       throws(() => entropyToMnemonic(new Uint8Array([0, 0, 0]), englishWordlist));
@@ -504,6 +668,53 @@ describe('BIP39', () => {
         false,
         'fails for invalid checksum'
       );
+    });
+  });
+  describe('Utility functions', () => {
+    should('equalBytes should compare Uint8Arrays correctly', () => {
+      const a = new Uint8Array([1, 2, 3]);
+      const b = new Uint8Array([1, 2, 3]);
+      const c = new Uint8Array([1, 2, 4]);
+      const d = new Uint8Array([1, 2]);
+      deepStrictEqual(equalBytes(a, b), true);
+      deepStrictEqual(equalBytes(a, c), false);
+      deepStrictEqual(equalBytes(a, d), false);
+    });
+
+    should('normalizeMnemonicBytes should clean up mnemonic input', () => {
+      const input = new TextEncoder().encode('  LEGAL   winner \n THANK   year  ');
+      const expected = 'legal winner thank year';
+      const normalized = normalizeMnemonicBytes(input);
+      deepStrictEqual(new TextDecoder().decode(normalized), expected);
+      normalized.fill(0);
+    });
+
+    should('splitMnemonicBytes should split English mnemonics', () => {
+      const mnemonic = new TextEncoder().encode('abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about');
+      const words = splitMnemonicBytes(mnemonic);
+      deepStrictEqual(words.length, 12);
+    });
+
+    should('splitMnemonicBytes should handle 12 words correctly', () => {
+      const mnemonic = new TextEncoder().encode('abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about');
+      const words = splitMnemonicBytes(mnemonic);
+      deepStrictEqual(words.length, 12);
+      deepStrictEqual(new TextDecoder().decode(words[0]), 'abandon');
+      deepStrictEqual(new TextDecoder().decode(words[11]), 'about');
+    });
+
+    should('splitMnemonicBytes should handle Japanese ideographic spaces', () => {
+      const mnemonic = new TextEncoder().encode('あいこくしん　あいこくしん　あいこくしん　あいこくしん　あいこくしん　あいこくしん　あいこくしん　あいこくしん　あいこくしん　あいこくしん　あいこくしん　あおぞら');
+      const words = splitMnemonicBytes(mnemonic);
+      deepStrictEqual(words.length, 12);
+      deepStrictEqual(new TextDecoder().decode(words[0]), 'あいこくしん');
+    });
+
+    should('nfkdBytes should normalize UTF-8 bytes', () => {
+      // '㍍' (U+3312) normalizes to 'メートル' in NFKD
+      const input = new TextEncoder().encode('㍍');
+      const normalized = nfkdBytes(input);
+      deepStrictEqual(new TextDecoder().decode(normalized), 'メートル');
     });
   });
 });
